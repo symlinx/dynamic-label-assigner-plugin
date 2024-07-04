@@ -1,0 +1,4 @@
+<?jelly escape-by-default='true'?>
+<div>
+    dynamic-label-assigner plugin changes docker pipelines to auto computed labels for GFS docker to OCP migration (author: Mouloud AOUALI)
+</div>
