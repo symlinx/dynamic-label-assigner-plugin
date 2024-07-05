@@ -7,7 +7,6 @@ import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.model.queue.QueueListener;
 import hudson.util.StreamTaskListener;
-import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
@@ -15,7 +14,6 @@ import org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution.Placeh
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -88,16 +86,8 @@ public class DynamicLabelQueueListener extends QueueListener {
 
                 if (pipelineScript != null) {
                     log(listener, "Retrieved pipeline script: " + pipelineScript, Level.INFO);
-                    if (isDeclarativePipeline(pipelineScript)) {
-                        log(listener, "Detected declarative pipeline.", Level.INFO);
-                        String newLabel = computeNewLabelFromScript(pipelineScript, listener);
-                        if (newLabel != null && !newLabel.isEmpty()) {
-                            pipelineScript = modifyScriptWithLabel(pipelineScript, newLabel, listener);
-                            modified = true;
-                        }
-                    } else {
-                        log(listener, "Scripted pipeline detected, ignoring.", Level.INFO);
-                    }
+                    pipelineScript = modifyAllDockerAgents(pipelineScript, listener);
+                    modified = true;
                 }
 
                 if (loadedScripts != null) {
@@ -106,15 +96,10 @@ public class DynamicLabelQueueListener extends QueueListener {
                         String scriptContent = entry.getValue();
 
                         log(listener, "Processing loaded script: " + scriptName, Level.INFO);
-                        if (isDeclarativePipeline(scriptContent)) {
-                            log(listener, "Detected declarative pipeline in loaded script.", Level.INFO);
-                            String newLabel = computeNewLabelFromScript(scriptContent, listener);
-                            if (newLabel != null && !newLabel.isEmpty()) {
-                                loadedScripts.put(scriptName, modifyScriptWithLabel(scriptContent, newLabel, listener));
-                                modified = true;
-                            }
-                        } else {
-                            log(listener, "Scripted pipeline detected in loaded script, ignoring.", Level.INFO);
+                        String modifiedScriptContent = modifyAllDockerAgents(scriptContent, listener);
+                        if (!scriptContent.equals(modifiedScriptContent)) {
+                            loadedScripts.put(scriptName, modifiedScriptContent);
+                            modified = true;
                         }
                     }
                 }
@@ -134,6 +119,24 @@ public class DynamicLabelQueueListener extends QueueListener {
             log(null, "Exception in handlePipelineJob: " + e.getMessage(), Level.SEVERE);
             e.printStackTrace();
         }
+    }
+
+    private String modifyAllDockerAgents(String script, TaskListener listener) {
+        log(listener, "Modifying all Docker agents in the script.", Level.INFO);
+        StringBuilder modifiedScript = new StringBuilder();
+        Matcher matcher = Pattern.compile("agent\\s*\\{\\s*docker\\s*\\{[^}]*image\\s+['\"]([^'\"]+)['\"].*?\\}\\s*\\}", Pattern.DOTALL).matcher(script);
+        int lastEnd = 0;
+        while (matcher.find()) {
+            modifiedScript.append(script, lastEnd, matcher.start());
+            String dockerImage = matcher.group(1);
+            String newLabel = "GFS_" + dockerImage.substring(dockerImage.lastIndexOf('/') + 1).replace(':', '_');
+            String modifiedAgent = matcher.group().replaceAll("docker\\s*\\{[^}]*\\}", "label '" + newLabel + "'");
+            modifiedScript.append(modifiedAgent);
+            lastEnd = matcher.end();
+        }
+        modifiedScript.append(script.substring(lastEnd));
+        log(listener, "Finished modifying Docker agents in the script.", Level.INFO);
+        return modifiedScript.toString();
     }
 
     private WorkflowRun getWorkflowRunFromItem(Queue.BuildableItem item, TaskListener listener) {
@@ -166,23 +169,6 @@ public class DynamicLabelQueueListener extends QueueListener {
         return matcher.find();
     }
 
-    private String computeNewLabelFromScript(String pipelineScript, TaskListener listener) {
-        log(listener, "Inside computeNewLabelFromScript", Level.INFO);
-        if (!isUsingDockerAgent(pipelineScript)) {
-            log(listener, "Script is not using Docker agent.", Level.INFO);
-            return null;
-        }
-
-        String dockerImage = extractDockerImage(pipelineScript);
-        if (dockerImage != null) {
-            String newLabel = "GFS_" + dockerImage.substring(dockerImage.lastIndexOf('/') + 1).replace(':', '_');
-            log(listener, "Computed new label: " + newLabel, Level.INFO);
-            return newLabel;
-        }
-        log(listener, "No Docker image found in the pipeline script.", Level.INFO);
-        return null;
-    }
-
     private boolean isUsingDockerAgent(String pipelineScript) {
         log(null, "Checking if the script is using Docker agent.", Level.INFO);
         Pattern pattern = Pattern.compile("agent\\s*\\{\\s*docker\\s*\\{", Pattern.MULTILINE);
@@ -201,13 +187,6 @@ public class DynamicLabelQueueListener extends QueueListener {
         }
         log(null, "No Docker image found.", Level.INFO);
         return null;
-    }
-
-    private String modifyScriptWithLabel(String script, String newLabel, TaskListener listener) {
-        log(listener, "Modifying script with new label: " + newLabel, Level.INFO);
-        String modifiedScript = script.replaceAll("agent\\s*\\{\\s*docker\\s*\\{[^}]*}\\s*}", "agent { label '" + newLabel + "' }");
-        log(listener, "Modified pipeline script: " + modifiedScript, Level.INFO);
-        return modifiedScript;
     }
 
     private void stopOriginalRun(WorkflowRun originalRun, TaskListener listener) {
