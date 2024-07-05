@@ -38,16 +38,10 @@ public class DynamicLabelQueueListener extends QueueListener {
         log(null, "Triggered for item: " + item.task.getName(), Level.INFO);
         log(null, "Task class: " + item.task.getClass().getName(), Level.INFO);
 
-        // Check if the build is triggered by the SYSTEM user
+        // Log and list all build causes
         List<Cause> causes = item.getCauses();
         for (Cause cause : causes) {
-            if (cause instanceof Cause.UserIdCause) {
-                Cause.UserIdCause userIdCause = (Cause.UserIdCause) cause;
-                if ("SYSTEM".equals(userIdCause.getUserId())) {
-                    log(null, "Build triggered by SYSTEM user, skipping processing for job: " + item.task.getName(), Level.INFO);
-                    return;
-                }
-            }
+            log(null, "Build cause: " + cause.getClass().getName() + " - " + cause.getShortDescription(), Level.INFO);
         }
 
         if (item.task instanceof PlaceholderTask) {
@@ -85,24 +79,53 @@ public class DynamicLabelQueueListener extends QueueListener {
 
             log(listener, "Retrieved ReplayAction for the run.", Level.INFO);
             String pipelineScript = replayAction.getOriginalScript();
-            if (pipelineScript != null) {
-                log(listener, "Retrieved pipeline script: " + pipelineScript, Level.INFO);
+            Map<String, String> loadedScripts = replayAction.getOriginalLoadedScripts();
 
-                if (isDeclarativePipeline(pipelineScript)) {
-                    log(listener, "Detected declarative pipeline.", Level.INFO);
-                    String newLabel = computeNewLabelFromScript(pipelineScript, listener);
-                    if (newLabel != null && !newLabel.isEmpty()) {
-                        String modifiedScript = modifyScriptWithLabel(pipelineScript, newLabel, listener);
-                        Map<String, String> loadedScripts = replayAction.getOriginalLoadedScripts();
-                        boolean replaySuccess = replayBuildWithModifiedScript(originalRun, modifiedScript, loadedScripts, listener);
-                        if (replaySuccess) {
-                            stopOriginalRun(originalRun, listener);
+            if (pipelineScript != null || loadedScripts != null) {
+                log(listener, "Retrieved pipeline and/or loaded scripts.", Level.INFO);
+
+                boolean modified = false;
+
+                if (pipelineScript != null) {
+                    log(listener, "Retrieved pipeline script: " + pipelineScript, Level.INFO);
+                    if (isDeclarativePipeline(pipelineScript)) {
+                        log(listener, "Detected declarative pipeline.", Level.INFO);
+                        String newLabel = computeNewLabelFromScript(pipelineScript, listener);
+                        if (newLabel != null && !newLabel.isEmpty()) {
+                            pipelineScript = modifyScriptWithLabel(pipelineScript, newLabel, listener);
+                            modified = true;
                         }
                     } else {
-                        log(listener, "No Docker agent found or no matching label. Running the script unmodified.", Level.INFO);
+                        log(listener, "Scripted pipeline detected, ignoring.", Level.INFO);
+                    }
+                }
+
+                if (loadedScripts != null) {
+                    for (Map.Entry<String, String> entry : loadedScripts.entrySet()) {
+                        String scriptName = entry.getKey();
+                        String scriptContent = entry.getValue();
+
+                        log(listener, "Processing loaded script: " + scriptName, Level.INFO);
+                        if (isDeclarativePipeline(scriptContent)) {
+                            log(listener, "Detected declarative pipeline in loaded script.", Level.INFO);
+                            String newLabel = computeNewLabelFromScript(scriptContent, listener);
+                            if (newLabel != null && !newLabel.isEmpty()) {
+                                loadedScripts.put(scriptName, modifyScriptWithLabel(scriptContent, newLabel, listener));
+                                modified = true;
+                            }
+                        } else {
+                            log(listener, "Scripted pipeline detected in loaded script, ignoring.", Level.INFO);
+                        }
+                    }
+                }
+
+                if (modified) {
+                    boolean replaySuccess = replayBuildWithModifiedScript(originalRun, pipelineScript, loadedScripts, listener);
+                    if (replaySuccess) {
+                        stopOriginalRun(originalRun, listener);
                     }
                 } else {
-                    log(listener, "Scripted pipeline detected, ignoring.", Level.INFO);
+                    log(listener, "No Docker agent found or no matching label. Running the script unmodified.", Level.INFO);
                 }
             } else {
                 log(listener, "No pipeline script found.", Level.SEVERE);
@@ -152,7 +175,7 @@ public class DynamicLabelQueueListener extends QueueListener {
 
         String dockerImage = extractDockerImage(pipelineScript);
         if (dockerImage != null) {
-            String newLabel = "GFS_" + dockerImage.replaceAll("[^a-zA-Z0-9_\\-]", "_");
+            String newLabel = "GFS_" + dockerImage.substring(dockerImage.lastIndexOf('/') + 1).replace(':', '_');
             log(listener, "Computed new label: " + newLabel, Level.INFO);
             return newLabel;
         }
