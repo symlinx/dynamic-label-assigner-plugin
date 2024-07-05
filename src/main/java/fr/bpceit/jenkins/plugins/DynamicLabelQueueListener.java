@@ -14,7 +14,6 @@ import org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution.Placeh
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -79,6 +78,8 @@ public class DynamicLabelQueueListener extends QueueListener {
             String pipelineScript = replayAction.getOriginalScript();
             Map<String, String> loadedScripts = replayAction.getOriginalLoadedScripts();
 
+            boolean hasDockerAgent = false;
+
             if (pipelineScript != null || loadedScripts != null) {
                 log(listener, "Retrieved pipeline and/or loaded scripts.", Level.INFO);
 
@@ -86,8 +87,11 @@ public class DynamicLabelQueueListener extends QueueListener {
 
                 if (pipelineScript != null) {
                     log(listener, "Retrieved pipeline script: " + pipelineScript, Level.INFO);
-                    pipelineScript = modifyAllDockerAgents(pipelineScript, listener);
-                    modified = true;
+                    hasDockerAgent = hasDockerAgent(pipelineScript);
+                    if (hasDockerAgent) {
+                        pipelineScript = modifyAllDockerAgents(pipelineScript, listener);
+                        modified = true;
+                    }
                 }
 
                 if (loadedScripts != null) {
@@ -96,15 +100,18 @@ public class DynamicLabelQueueListener extends QueueListener {
                         String scriptContent = entry.getValue();
 
                         log(listener, "Processing loaded script: " + scriptName, Level.INFO);
-                        String modifiedScriptContent = modifyAllDockerAgents(scriptContent, listener);
-                        if (!scriptContent.equals(modifiedScriptContent)) {
-                            loadedScripts.put(scriptName, modifiedScriptContent);
-                            modified = true;
+                        if (hasDockerAgent(scriptContent)) {
+                            hasDockerAgent = true;
+                            String modifiedScriptContent = modifyAllDockerAgents(scriptContent, listener);
+                            if (!scriptContent.equals(modifiedScriptContent)) {
+                                loadedScripts.put(scriptName, modifiedScriptContent);
+                                modified = true;
+                            }
                         }
                     }
                 }
 
-                if (modified) {
+                if (hasDockerAgent && modified) {
                     boolean replaySuccess = replayBuildWithModifiedScript(originalRun, pipelineScript, loadedScripts, listener);
                     if (replaySuccess) {
                         stopOriginalRun(originalRun, listener);
@@ -137,6 +144,12 @@ public class DynamicLabelQueueListener extends QueueListener {
         modifiedScript.append(script.substring(lastEnd));
         log(listener, "Finished modifying Docker agents in the script.", Level.INFO);
         return modifiedScript.toString();
+    }
+
+    private boolean hasDockerAgent(String script) {
+        Pattern pattern = Pattern.compile("agent\\s*\\{\\s*docker\\s*\\{", Pattern.MULTILINE);
+        Matcher matcher = pattern.matcher(script);
+        return matcher.find();
     }
 
     private WorkflowRun getWorkflowRunFromItem(Queue.BuildableItem item, TaskListener listener) {
