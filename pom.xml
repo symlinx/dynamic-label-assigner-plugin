@@ -11,18 +11,16 @@
 
     <groupId>fr.bpceit.jenkins.plugins</groupId>
     <artifactId>dynamic-label-assigner</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.0.85</version>
     <packaging>hpi</packaging>
 
     <name>Dynamic Label Assigner</name>
     <url>http://www.example.com</url>
 
     <properties>
-        <jenkins.version>2.440.1</jenkins.version>
+        <jenkins.version>2.361.4</jenkins.version>
         <hpi.plugin.version>3.55</hpi.plugin.version>
     </properties>
-
-
     <dependencies>
         <dependency>
             <groupId>org.jenkins-ci.main</groupId>

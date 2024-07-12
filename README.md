@@ -6,23 +6,23 @@ The Dynamic Label Assigner Plugin is a Jenkins plugin designed to dynamically as
 
 ### Prerequisites
 
-- Java Development Kit (JDK) 8 or higher
-- Apache Maven 3.6.0 or higher
-- Jenkins 2.176.1 or higher
+- Java Development Kit (JDK) 11 or higher
+- Apache Maven 3.8.0 or higher
+- Jenkins 2.361.4 or higher
 
 ### Steps to Compile and Install
 
 1. **Clone the repository:**
 
     ```sh
-    git clone https://github.com/yourusername/dynamic-label-assigner.git
-    cd dynamic-label-assigner
+    git clone https://github.com/symlinx/dynamic-label-assigner-plugin.git
+    cd dynamic-label-assigner-plugin
     ```
 
 2. **Compile the project using Maven:**
 
     ```sh
-    mvn clean install
+    mvn -s settings.xml clean package 
     ```
 
 3. **Install the plugin in Jenkins:**
